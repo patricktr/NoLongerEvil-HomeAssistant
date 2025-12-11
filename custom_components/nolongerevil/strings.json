@@ -60,9 +60,6 @@
       "target_temperature": {
         "name": "Target temperature"
       },
-      "humidity": {
-        "name": "Humidity"
-      },
       "hvac_action": {
         "name": "HVAC action"
       }

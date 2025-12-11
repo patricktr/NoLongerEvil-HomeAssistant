@@ -57,7 +57,6 @@ STATE_CAN_HEAT: Final = "can_heat"
 STATE_TEMP_SCALE: Final = "temperature_scale"
 STATE_ECO_MODE: Final = "eco_mode_enabled"
 STATE_TEMP_LOCK: Final = "temperature_lock_enabled"
-STATE_HUMIDITY: Final = "current_humidity"
 
 # Access types
 ACCESS_TYPE_OWNER: Final = "owner"

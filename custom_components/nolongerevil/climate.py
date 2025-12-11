@@ -177,14 +177,6 @@ class NLEClimate(NLEEntity, ClimateEntity):
         return None
 
     @property
-    def current_humidity(self) -> int | None:
-        """Return the current humidity."""
-        status = self.device_status
-        if status is None or status.current_humidity is None:
-            return None
-        return int(status.current_humidity)
-
-    @property
     def fan_mode(self) -> str | None:
         """Return the current fan mode."""
         status = self.device_status
