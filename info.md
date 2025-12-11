@@ -5,7 +5,7 @@ Control your No Longer Evil smart thermostat from Home Assistant.
 ## Features
 
 - Full climate control (temperature, mode, fan)
-- Temperature and humidity sensors
+- Temperature sensors
 - HVAC status binary sensors
 - Away mode switch
 - Support for heat-cool (auto) mode with temperature ranges

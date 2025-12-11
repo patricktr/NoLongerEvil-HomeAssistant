@@ -9,7 +9,7 @@ A Home Assistant integration for [No Longer Evil](https://nolongerevil.com) - pr
 ## Features
 
 - **Climate Control**: Full thermostat control including temperature, HVAC modes, and fan modes
-- **Temperature Monitoring**: Real-time temperature and humidity sensors
+- **Temperature Monitoring**: Real-time temperature sensors
 - **HVAC Status**: Binary sensors for heating, cooling, and fan activity
 - **Away Mode**: Switch to enable/disable away mode for energy savings
 - **Temperature Range**: Support for heat-cool mode with temperature ranges
@@ -72,7 +72,6 @@ The main climate entity provides full thermostat control:
 |--------|-------------|
 | Current Temperature | Current room temperature reading |
 | Target Temperature | Currently set target temperature |
-| Humidity | Current humidity level (if available) |
 | HVAC Action | Current action (heating, cooling, idle, fan) |
 
 ### Binary Sensors
