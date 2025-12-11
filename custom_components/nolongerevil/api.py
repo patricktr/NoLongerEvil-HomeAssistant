@@ -72,6 +72,12 @@ class NLEDeviceStatus:
         shared_obj = state.get(shared_key, {})
         shared_data = shared_obj.get("value", {})
 
+        # Debug: Log available fields in shared data (using INFO to ensure visibility)
+        _LOGGER.info("NLE DEBUG - Shared data fields for device %s: %s", self.serial, list(shared_data.keys()))
+        if "humidity" in str(shared_data.keys()).lower():
+            _LOGGER.info("NLE DEBUG - Found humidity-related field!")
+        _LOGGER.info("NLE DEBUG - All shared data: %s", shared_data)
+
         # Find the device settings data
         device_key = f"device.{self.serial}"
         device_obj = state.get(device_key, {})
