@@ -36,7 +36,6 @@ async def async_setup_entry(
         entities.extend([
             NLETemperatureSensor(coordinator, device),
             NLETargetTemperatureSensor(coordinator, device),
-            NLEHumiditySensor(coordinator, device),
             NLEHVACActionSensor(coordinator, device),
         ])
 
@@ -109,40 +108,6 @@ class NLETargetTemperatureSensor(NLEEntity, SensorEntity):
             attrs["high"] = status.target_temperature_high
 
         return attrs
-
-
-class NLEHumiditySensor(NLEEntity, SensorEntity):
-    """Representation of a No Longer Evil humidity sensor."""
-
-    _attr_device_class = SensorDeviceClass.HUMIDITY
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_name = "Humidity"
-
-    def __init__(
-        self,
-        coordinator: NLEDataUpdateCoordinator,
-        device: NLEDevice,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator, device)
-        self._attr_unique_id = f"{device.id}_humidity"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current humidity."""
-        status = self.device_status
-        if status is None or status.current_humidity is None:
-            return None
-        return status.current_humidity
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        if not super().available:
-            return False
-        status = self.device_status
-        return status is not None and status.current_humidity is not None
 
 
 class NLEHVACActionSensor(NLEEntity, SensorEntity):
