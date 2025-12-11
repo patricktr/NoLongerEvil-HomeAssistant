@@ -1,0 +1,8 @@
+{
+  "name": "No Longer Evil",
+  "homeassistant": "2024.1.0",
+  "render_readme": true,
+  "zip_release": true,
+  "filename": "nolongerevil.zip",
+  "content_in_root": false
+}

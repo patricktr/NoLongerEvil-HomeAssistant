@@ -1,0 +1,90 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to No Longer Evil",
+        "description": "Enter your No Longer Evil API key. You can get an API key from your account settings at https://nolongerevil.com/settings",
+        "data": {
+          "api_key": "API Key",
+          "base_url": "API Base URL (optional)"
+        },
+        "data_description": {
+          "api_key": "Your No Longer Evil API key (starts with 'nle_')",
+          "base_url": "Only change this if you are using a self-hosted instance"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate No Longer Evil",
+        "description": "Your API key is no longer valid. Please enter a new API key.",
+        "data": {
+          "api_key": "API Key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API key. Please check your credentials.",
+      "cannot_connect": "Unable to connect to the No Longer Evil API. Please check your network connection.",
+      "no_devices": "No devices found for this account. Please add a thermostat first.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": {
+      "already_configured": "This account is already configured.",
+      "reauth_successful": "Reauthentication was successful.",
+      "reauth_failed": "Reauthentication failed. Please try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "No Longer Evil Options",
+        "description": "Configure integration options",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often to poll for updates (10-300 seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "thermostat": {
+        "name": "Thermostat"
+      }
+    },
+    "sensor": {
+      "temperature": {
+        "name": "Current temperature"
+      },
+      "target_temperature": {
+        "name": "Target temperature"
+      },
+      "humidity": {
+        "name": "Humidity"
+      },
+      "hvac_action": {
+        "name": "HVAC action"
+      }
+    },
+    "binary_sensor": {
+      "heating": {
+        "name": "Heating"
+      },
+      "cooling": {
+        "name": "Cooling"
+      },
+      "fan_running": {
+        "name": "Fan running"
+      },
+      "home": {
+        "name": "Home"
+      }
+    },
+    "switch": {
+      "away_mode": {
+        "name": "Away mode"
+      }
+    }
+  }
+}
