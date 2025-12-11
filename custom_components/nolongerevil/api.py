@@ -58,17 +58,24 @@ class NLEDeviceStatus:
 
     def _parse_data(self) -> None:
         """Parse the status data from the API response."""
-        self.device_id: str = self._data.get("id", "")
-        self.serial: str = self._data.get("serial", "")
-        self.name: str | None = self._data.get("name")
+        # Get device metadata
+        device_info = self._data.get("device", {})
+        self.device_id: str = device_info.get("id", "")
+        self.serial: str = device_info.get("serial", "")
+        self.name: str | None = device_info.get("name")
+
+        # Get state data
+        state = self._data.get("state", {})
 
         # Find the shared state data
         shared_key = f"shared.{self.serial}"
-        shared_data = self._data.get(shared_key, {})
+        shared_obj = state.get(shared_key, {})
+        shared_data = shared_obj.get("value", {})
 
         # Find the device settings data
         device_key = f"device.{self.serial}"
-        device_data = self._data.get(device_key, {})
+        device_obj = state.get(device_key, {})
+        device_data = device_obj.get("value", {})
 
         # Current state
         self.current_temperature: float | None = shared_data.get("current_temperature")
