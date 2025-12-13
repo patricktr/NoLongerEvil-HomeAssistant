@@ -1,8 +1,8 @@
 # No Longer Evil - Home Assistant Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/release/nolongerevil/NoLongerEvil-HomeAssistant.svg)](https://github.com/patricktr/NoLongerEvil-HomeAssistant/releases)
-[![License](https://img.shields.io/github/license/nolongerevil/NoLongerEvil-HomeAssistant.svg)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/release/patricktr/NoLongerEvil-HomeAssistant.svg)](https://github.com/patricktr/NoLongerEvil-HomeAssistant/releases)
+[![License](https://img.shields.io/github/license/patricktr/NoLongerEvil-HomeAssistant.svg)](https://github.com/patricktr/NoLongerEvil-HomeAssistant/blob/main/LICENSE)
 
 A Home Assistant integration for [No Longer Evil](https://nolongerevil.com) - providing local and cloud control of your smart thermostat.
 
