@@ -70,6 +70,7 @@ class NLEClimate(NLEEntity, ClimateEntity):
         self._attr_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.PRESET_MODE
             | ClimateEntityFeature.TURN_OFF
             | ClimateEntityFeature.TURN_ON
         )
