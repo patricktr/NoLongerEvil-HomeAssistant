@@ -6,6 +6,11 @@
 
 A Home Assistant integration for [No Longer Evil](https://nolongerevil.com) - providing local and cloud control of your smart thermostat.
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs-url]
+
+[my-hacs-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
+[my-hacs-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=patricktr&repository=NoLongerEvil-HomeAssistant&category=integration
+
 ## Features
 
 - **Climate Control**: Full thermostat control including temperature, HVAC modes, and fan modes
@@ -19,6 +24,14 @@ A Home Assistant integration for [No Longer Evil](https://nolongerevil.com) - pr
 
 ### HACS (Recommended)
 
+1. Click the button below to open HACS:
+
+   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs-url]
+
+2. Click "Download"
+3. Restart Home Assistant
+
+#### Manual HACS (if the my Home Assistant button isn't working)
 1. Open HACS in your Home Assistant instance
 2. Click on "Integrations"
 3. Click the three dots in the top right corner
