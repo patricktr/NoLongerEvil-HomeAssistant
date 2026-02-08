@@ -31,7 +31,8 @@ A Home Assistant integration for [No Longer Evil](https://nolongerevil.com) - pr
 2. Click "Download"
 3. Restart Home Assistant
 
-#### Manual HACS (if the my Home Assistant button isn't working)
+### HACS (if the my Home Assistant button isn't working)
+
 1. Open HACS in your Home Assistant instance
 2. Click on "Integrations"
 3. Click the three dots in the top right corner
