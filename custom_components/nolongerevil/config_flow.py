@@ -41,7 +41,7 @@ class NLEConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> NLEOptionsFlow:
         """Get the options flow for this handler."""
-        return NLEOptionsFlow(config_entry)
+        return NLEOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -160,10 +160,6 @@ class NLEConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class NLEOptionsFlow(OptionsFlow):
     """Handle options flow for No Longer Evil."""
-
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
