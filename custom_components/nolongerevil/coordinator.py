@@ -35,6 +35,11 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         self.client = client
         self.devices = {device.id: device for device in devices}
 
+        # Latch device capabilities: once can_cool/can_heat is seen as True,
+        # keep it True. The Nest API can temporarily report False even when
+        # the wiring hasn't changed.
+        self._capability_cache: dict[str, dict[str, bool]] = {}
+
         scan_interval = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
@@ -55,6 +60,7 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             for device_id in self.devices:
                 try:
                     status = await self.client.get_device_status(device_id)
+                    self._apply_capability_latch(device_id, status)
                     data[device_id] = status
                 except NLEError as err:
                     _LOGGER.warning(
@@ -75,6 +81,45 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             raise UpdateFailed("Failed to get status for any device")
 
         return data
+
+    def _apply_capability_latch(
+        self, device_id: str, status: NLEDeviceStatus
+    ) -> None:
+        """Latch device capabilities so they don't regress to False.
+
+        The Nest API can temporarily report can_cool=False even when the
+        thermostat has cooling wires connected. Once we see a capability
+        as True, we keep it True for the lifetime of this coordinator.
+        """
+        if device_id not in self._capability_cache:
+            self._capability_cache[device_id] = {
+                "can_cool": False,
+                "can_heat": False,
+            }
+
+        cache = self._capability_cache[device_id]
+
+        # Latch to True — never downgrade back to False
+        if status.can_cool:
+            cache["can_cool"] = True
+        if status.can_heat:
+            cache["can_heat"] = True
+
+        # Apply latched values back to the status object
+        if cache["can_cool"] and not status.can_cool:
+            _LOGGER.debug(
+                "Device %s: API reported can_cool=False but previously "
+                "reported True — keeping can_cool=True",
+                device_id,
+            )
+            status.can_cool = True
+        if cache["can_heat"] and not status.can_heat:
+            _LOGGER.debug(
+                "Device %s: API reported can_heat=False but previously "
+                "reported True — keeping can_heat=True",
+                device_id,
+            )
+            status.can_heat = True
 
     def get_device(self, device_id: str) -> NLEDevice | None:
         """Get device info by ID."""

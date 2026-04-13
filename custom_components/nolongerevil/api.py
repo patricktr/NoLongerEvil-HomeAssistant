@@ -106,6 +106,14 @@ class NLEDeviceStatus:
         self.can_cool: bool = shared_data.get("can_cool", False)
         self.can_heat: bool = shared_data.get("can_heat", True)
 
+        _LOGGER.debug(
+            "Device %s capabilities: can_heat=%s, can_cool=%s (raw shared data keys: %s)",
+            self.serial,
+            self.can_heat,
+            self.can_cool,
+            list(shared_data.keys()),
+        )
+
         # Device settings
         self.temperature_scale: str = device_data.get("temperature_scale", "C")
         self.eco_mode_enabled: bool = device_data.get("eco_mode_enabled", False)
