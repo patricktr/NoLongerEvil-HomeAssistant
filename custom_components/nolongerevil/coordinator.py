@@ -37,8 +37,18 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
 
         # Latch device capabilities: once can_cool/can_heat is seen as True,
         # keep it True. The Nest API can temporarily report False even when
-        # the wiring hasn't changed.
-        self._capability_cache: dict[str, dict[str, bool]] = {}
+        # the wiring hasn't changed. Pre-populate from persisted config entry
+        # data so the latch survives HA restarts and integration reloads.
+        persisted_caps: dict[str, dict[str, bool]] = config_entry.data.get(
+            "capability_cache", {}
+        )
+        self._capability_cache: dict[str, dict[str, bool]] = {
+            device.id: {
+                "can_cool": persisted_caps.get(device.id, {}).get("can_cool", False),
+                "can_heat": persisted_caps.get(device.id, {}).get("can_heat", False),
+            }
+            for device in devices
+        }
 
         scan_interval = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -92,18 +102,26 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         as True, we keep it True for the lifetime of this coordinator.
         """
         if device_id not in self._capability_cache:
+            persisted = self.config_entry.data.get("capability_cache", {})
             self._capability_cache[device_id] = {
-                "can_cool": False,
-                "can_heat": False,
+                "can_cool": persisted.get(device_id, {}).get("can_cool", False),
+                "can_heat": persisted.get(device_id, {}).get("can_heat", False),
             }
 
         cache = self._capability_cache[device_id]
 
-        # Latch to True — never downgrade back to False
-        if status.can_cool:
+        # Latch to True — never downgrade back to False.
+        # Persist to config entry data whenever a new True is observed so the
+        # latch survives HA restarts and integration reloads.
+        needs_persist = False
+        if status.can_cool and not cache["can_cool"]:
             cache["can_cool"] = True
-        if status.can_heat:
+            needs_persist = True
+        if status.can_heat and not cache["can_heat"]:
             cache["can_heat"] = True
+            needs_persist = True
+        if needs_persist:
+            self._persist_capability_cache()
 
         # Apply latched values back to the status object
         if cache["can_cool"] and not status.can_cool:
@@ -120,6 +138,15 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                 device_id,
             )
             status.can_heat = True
+
+    def _persist_capability_cache(self) -> None:
+        """Persist the capability cache to config entry data.
+
+        This ensures the latch survives HA restarts and integration reloads.
+        """
+        new_data = {**self.config_entry.data, "capability_cache": self._capability_cache}
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+        _LOGGER.debug("Persisted capability cache: %s", self._capability_cache)
 
     def get_device(self, device_id: str) -> NLEDevice | None:
         """Get device info by ID."""
