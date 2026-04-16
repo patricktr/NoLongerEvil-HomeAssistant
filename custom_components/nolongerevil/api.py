@@ -126,6 +126,10 @@ class NLEDeviceStatus:
         """Return the current HVAC mode."""
         if self.target_temperature_type == "range":
             return "heat-cool"
+        if self.target_temperature_type == "emergency":
+            # Emergency heat is a safety mode — treat it as heat so HA
+            # correctly shows the unit as heating rather than off.
+            return "heat"
         return self.target_temperature_type
 
     @property
