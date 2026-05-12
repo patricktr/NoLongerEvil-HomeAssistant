@@ -18,6 +18,14 @@ from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
 
 _LOGGER = logging.getLogger(__name__)
 
+# Number of consecutive polls in which the API-key probe must return 401
+# before we tear down the integration with ConfigEntryAuthFailed. Defending
+# against the case where the upstream service simultaneously returns 401 on
+# both the per-device status endpoint and the list-devices probe — e.g. a
+# brief auth-service flap during a deploy — while still surfacing a real
+# revoked-key state within ~3 polls.
+_AUTH_PROBE_FAILURE_THRESHOLD = 3
+
 
 class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]):
     """Class to manage fetching data from the API."""
@@ -50,6 +58,8 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             for device in devices
         }
 
+        self._consecutive_auth_probe_failures = 0
+
         scan_interval = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
@@ -65,6 +75,12 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
     async def _async_update_data(self) -> dict[str, NLEDeviceStatus]:
         """Fetch data from API for all devices."""
         data: dict[str, NLEDeviceStatus] = {}
+        # Probe outcome cached per-poll so we run at most one list-devices
+        # call per cycle no matter how many devices return 401.
+        # True  = probe succeeded (key valid)
+        # False = probe returned 401 (key looks invalid)
+        # None  = not probed yet, or probe was inconclusive (other error)
+        auth_probe_result: bool | None = None
 
         try:
             for device_id in self.devices:
@@ -73,16 +89,12 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     self._apply_capability_latch(device_id, status)
                     data[device_id] = status
                 except NLEAuthenticationError as err:
-                    # Probe with a list-devices call before tearing down the
-                    # integration: a single 401 on a per-device endpoint can
-                    # come from an upstream gateway blip rather than a revoked
-                    # key. Only escalate if the probe also fails.
-                    if not await self._api_key_still_valid():
-                        raise
+                    if auth_probe_result is None:
+                        auth_probe_result = await self._probe_api_key()
                     _LOGGER.debug(
-                        "Device %s returned auth error but API key probe "
-                        "succeeded; treating as transient: %s",
+                        "Device %s returned auth error (probe result: %s): %s",
                         device_id,
+                        auth_probe_result,
                         err,
                     )
                 except NLEError as err:
@@ -93,6 +105,32 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     _LOGGER.debug(
                         "Failed to get status for device %s: %s", device_id, err
                     )
+
+            # Reconcile the consecutive-failure counter once per poll.
+            if data or auth_probe_result is True:
+                # Any evidence the key works this poll resets the counter:
+                # either a device fetch succeeded, or the explicit probe
+                # confirmed the key is valid.
+                self._consecutive_auth_probe_failures = 0
+            elif auth_probe_result is False:
+                self._consecutive_auth_probe_failures += 1
+                if (
+                    self._consecutive_auth_probe_failures
+                    >= _AUTH_PROBE_FAILURE_THRESHOLD
+                ):
+                    raise NLEAuthenticationError(
+                        "API key probe returned 401 on "
+                        f"{self._consecutive_auth_probe_failures} consecutive polls"
+                    )
+                _LOGGER.warning(
+                    "API key probe returned 401 (%d/%d consecutive); deferring "
+                    "re-auth in case this is a transient upstream flap",
+                    self._consecutive_auth_probe_failures,
+                    _AUTH_PROBE_FAILURE_THRESHOLD,
+                )
+            # auth_probe_result is None and no device succeeded: probe wasn't
+            # run or was inconclusive — leave the counter alone and fall
+            # through to the UpdateFailed below.
 
         except NLEAuthenticationError as err:
             raise ConfigEntryAuthFailed(
@@ -108,21 +146,21 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
 
         return data
 
-    async def _api_key_still_valid(self) -> bool:
+    async def _probe_api_key(self) -> bool | None:
         """Probe the API to check whether the configured key is still valid.
 
-        Returns True if a list-devices call succeeds (key is good), False if
-        it fails with NLEAuthenticationError (key is revoked/invalid). Any
-        other failure is treated as "valid" since we can't distinguish it
-        from an upstream blip and shouldn't trigger re-auth on connectivity
-        errors.
+        Returns True if a list-devices call succeeds (key is definitively
+        valid), False if it fails with NLEAuthenticationError (key looks
+        invalid), or None if the probe was inconclusive (other error such as
+        a 502 from the upstream gateway) — in which case the caller should
+        not change the consecutive-failure counter.
         """
         try:
             await self.client.get_devices()
         except NLEAuthenticationError:
             return False
         except NLEError:
-            return True
+            return None
         return True
 
     def _apply_capability_latch(
