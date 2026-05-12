@@ -213,7 +213,11 @@ class NLEApiClient:
                     raise NLEAuthenticationError("Invalid API key")
 
                 if response.status == 403:
-                    raise NLEAuthenticationError("Access denied to resource")
+                    # 403 is an authorization failure on a specific resource
+                    # (e.g. shared device without write permission, temperature
+                    # lock, transient gateway authz hiccup). The API key itself
+                    # is still valid, so this must not trigger a re-auth flow.
+                    raise NLEAPIError("Access denied to resource")
 
                 if response.status == 429:
                     retry_after = None

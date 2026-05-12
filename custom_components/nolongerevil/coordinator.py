@@ -72,10 +72,19 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     status = await self.client.get_device_status(device_id)
                     self._apply_capability_latch(device_id, status)
                     data[device_id] = status
-                except NLEAuthenticationError:
-                    # Let auth errors bubble up so HA can trigger the re-auth
-                    # flow instead of silently logging and continuing.
-                    raise
+                except NLEAuthenticationError as err:
+                    # Probe with a list-devices call before tearing down the
+                    # integration: a single 401 on a per-device endpoint can
+                    # come from an upstream gateway blip rather than a revoked
+                    # key. Only escalate if the probe also fails.
+                    if not await self._api_key_still_valid():
+                        raise
+                    _LOGGER.debug(
+                        "Device %s returned auth error but API key probe "
+                        "succeeded; treating as transient: %s",
+                        device_id,
+                        err,
+                    )
                 except NLEError as err:
                     # Transient per-device errors (e.g. occasional HTTP 502 from
                     # the upstream gateway) — keep noise out of the log and let
@@ -98,6 +107,23 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             raise UpdateFailed("Failed to get status for any device")
 
         return data
+
+    async def _api_key_still_valid(self) -> bool:
+        """Probe the API to check whether the configured key is still valid.
+
+        Returns True if a list-devices call succeeds (key is good), False if
+        it fails with NLEAuthenticationError (key is revoked/invalid). Any
+        other failure is treated as "valid" since we can't distinguish it
+        from an upstream blip and shouldn't trigger re-auth on connectivity
+        errors.
+        """
+        try:
+            await self.client.get_devices()
+        except NLEAuthenticationError:
+            return False
+        except NLEError:
+            return True
+        return True
 
     def _apply_capability_latch(
         self, device_id: str, status: NLEDeviceStatus
