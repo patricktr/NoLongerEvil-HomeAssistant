@@ -132,6 +132,23 @@ during setup and point the integration at your server's **Control API**:
 > between server versions. If you also run an MQTT broker, the server can publish
 > Home Assistant MQTT discovery records as an alternative to this integration.
 
+### Running the NLE server as a Home Assistant add-on
+
+If you're running the No Longer Evil server as a Home Assistant add-on, the
+add-on defaults to **Ingress** and only exposes its internal proxy ports — the
+Control API port (`8082`) is not reachable from this integration in that
+configuration. To use this integration with the add-on:
+
+1. Open the add-on **Configuration** tab
+2. Under **Network**, expose the **Control API + Web UI** port (`8082`) on the
+   host — assign it a host port (typically also `8082`)
+3. Restart the add-on
+4. In the integration setup, use your Home Assistant host's LAN IP with that
+   port, e.g. `http://<homeassistant-ip>:8082` (not the Ingress URL)
+
+See [#11](https://github.com/patricktr/NoLongerEvil-HomeAssistant/issues/11) for
+background on this configuration.
+
 ## Troubleshooting
 
 ### Authentication Errors
