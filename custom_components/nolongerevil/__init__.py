@@ -77,5 +77,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options."""
+    """Reload the entry when its configuration changes.
+
+    This listener fires for every entry update, including the coordinator
+    persisting its runtime caches into entry data. Those writes must not
+    reload the integration — a reload briefly flips every entity to
+    unavailable, which is not acceptable for a routine HVAC state change.
+    """
+    coordinator: NLEDataUpdateCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is not None and not coordinator.config_requires_reload():
+        _LOGGER.debug("Entry update only touched runtime caches; skipping reload")
+        return
     await hass.config_entries.async_reload(entry.entry_id)

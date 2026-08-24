@@ -22,6 +22,12 @@ DEFAULT_BASE_URL: Final = "https://nolongerevil.com/api/v1"
 DEFAULT_SELFHOSTED_URL: Final = "http://192.168.1.50:8082"
 DEFAULT_SCAN_INTERVAL: Final = 30  # seconds
 
+# Config entry data keys the coordinator writes at runtime (the capability
+# latch, and the HVAC-mode latch once present). The update listener must not
+# treat writes to these as configuration changes, because reloading the
+# integration for them would briefly flip every entity to unavailable.
+RUNTIME_CACHE_KEYS: Final = ("capability_cache", "mode_cache")
+
 # Cloud API endpoints
 ENDPOINT_DEVICES: Final = "/devices"
 ENDPOINT_STATUS: Final = "/thermostat/{device_id}/status"

@@ -13,7 +13,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import NLEClientBase, NLEDevice, NLEDeviceStatus
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, RUNTIME_CACHE_KEYS
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,6 +25,22 @@ _LOGGER = logging.getLogger(__name__)
 # brief auth-service flap during a deploy — while still surfacing a real
 # revoked-key state within ~3 polls.
 _AUTH_PROBE_FAILURE_THRESHOLD = 3
+
+
+def _reload_relevant_config(
+    config_entry: ConfigEntry,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the parts of the entry config that require a reload to apply.
+
+    The runtime caches the coordinator itself persists into entry data are
+    excluded, so writing them never looks like a configuration change.
+    """
+    data = {
+        key: value
+        for key, value in config_entry.data.items()
+        if key not in RUNTIME_CACHE_KEYS
+    }
+    return data, dict(config_entry.options)
 
 
 class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]):
@@ -71,6 +87,19 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             update_interval=timedelta(seconds=scan_interval),
             config_entry=config_entry,
         )
+
+        # Snapshot of the reload-relevant config this coordinator was built
+        # from, compared by config_requires_reload when the entry changes.
+        self._setup_config = _reload_relevant_config(config_entry)
+
+    def config_requires_reload(self) -> bool:
+        """Return True when the entry config changed in a way that needs a reload.
+
+        Returns False for entry updates that only touched the runtime caches
+        this coordinator persists (see RUNTIME_CACHE_KEYS), since the running
+        setup already reflects those values.
+        """
+        return _reload_relevant_config(self.config_entry) != self._setup_config
 
     async def _async_update_data(self) -> dict[str, NLEDeviceStatus]:
         """Fetch data from API for all devices."""
