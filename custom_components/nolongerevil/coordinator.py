@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -26,6 +27,15 @@ _LOGGER = logging.getLogger(__name__)
 # brief auth-service flap during a deploy — while still surfacing a real
 # revoked-key state within ~3 polls.
 _AUTH_PROBE_FAILURE_THRESHOLD = 3
+
+# How long a device may keep serving its last complete snapshot while the API
+# returns incomplete statuses. Generous enough to ride out a router reboot,
+# but bounded so a persistent API problem surfaces as unavailable entities
+# instead of indefinitely frozen values. Both limits apply: the poll count
+# scales with the configured scan interval, and the wall-clock cap keeps slow
+# intervals (up to 300 s) from stretching retention to nearly an hour.
+_MAX_INCOMPLETE_POLLS = 10
+_MAX_STALE_SECONDS = 15 * 60
 
 
 def _reload_relevant_config(
@@ -84,6 +94,14 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             if device.id in persisted_modes
         }
 
+        # Staleness bookkeeping for incomplete statuses: consecutive
+        # incomplete polls per device, when each streak started, and which
+        # devices have been dropped from the data set until a complete
+        # status arrives.
+        self._incomplete_streak: dict[str, int] = {}
+        self._incomplete_since: dict[str, float] = {}
+        self._stale_unavailable: set[str] = set()
+
         self._consecutive_auth_probe_failures = 0
 
         scan_interval = config_entry.options.get(
@@ -128,6 +146,7 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     self._apply_capability_latch(device_id, status)
                     self._apply_mode_latch(device_id, status)
                     data[device_id] = status
+                    self._note_complete_status(device_id)
                 except NLEAuthenticationError as err:
                     if auth_probe_result is None:
                         auth_probe_result = await self._probe_api_key()
@@ -138,19 +157,9 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                         err,
                     )
                 except NLEIncompleteStatusError:
-                    # Preserve the last complete snapshot when shared state is omitted.
-                    previous_status = self.get_device_status(device_id)
-                    if previous_status is not None:
-                        cached_mode = self._mode_cache.get(device_id)
-                        if cached_mode is not None:
-                            previous_status.target_temperature_type = cached_mode
-                        data[device_id] = previous_status
-                    _LOGGER.debug(
-                        "Device %s returned an incomplete status; retained "
-                        "last known status: %s",
-                        device_id,
-                        previous_status is not None,
-                    )
+                    retained = self._handle_incomplete_status(device_id)
+                    if retained is not None:
+                        data[device_id] = retained
                 except NLEError as err:
                     # Transient per-device errors (e.g. occasional HTTP 502 from
                     # the upstream gateway) — keep noise out of the log and let
@@ -295,6 +304,75 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         new_data = {**self.config_entry.data, "mode_cache": self._mode_cache}
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
         _LOGGER.debug("Persisted mode cache: %s", self._mode_cache)
+
+    def _handle_incomplete_status(self, device_id: str) -> NLEDeviceStatus | None:
+        """Serve the last complete snapshot through a bounded outage.
+
+        Returns the snapshot to keep publishing, or None once the device has
+        been incomplete for more than _MAX_INCOMPLETE_POLLS consecutive polls
+        or _MAX_STALE_SECONDS — the device then drops out of the data set and
+        its entities go unavailable until a complete status arrives.
+        """
+        now = monotonic()
+        streak = self._incomplete_streak.get(device_id, 0) + 1
+        self._incomplete_streak[device_id] = streak
+        stale_since = self._incomplete_since.setdefault(device_id, now)
+
+        if (
+            streak <= _MAX_INCOMPLETE_POLLS
+            and now - stale_since <= _MAX_STALE_SECONDS
+        ):
+            previous_status = self.get_device_status(device_id)
+            if previous_status is not None:
+                cached_mode = self._mode_cache.get(device_id)
+                if cached_mode is not None:
+                    previous_status.target_temperature_type = cached_mode
+                _LOGGER.debug(
+                    "Device %s returned an incomplete status; retaining last "
+                    "known status (%d consecutive)",
+                    device_id,
+                    streak,
+                )
+                return previous_status
+            _LOGGER.debug(
+                "Device %s returned an incomplete status with no snapshot "
+                "to retain (%d consecutive)",
+                device_id,
+                streak,
+            )
+            return None
+
+        if device_id not in self._stale_unavailable:
+            self._stale_unavailable.add(device_id)
+            _LOGGER.warning(
+                "Device %s has returned no complete status for %d consecutive "
+                "polls (%.0f s); its entities are unavailable until a "
+                "complete status arrives",
+                device_id,
+                streak,
+                now - stale_since,
+            )
+        else:
+            _LOGGER.debug(
+                "Device %s still returning incomplete statuses "
+                "(%d consecutive)",
+                device_id,
+                streak,
+            )
+        return None
+
+    def _note_complete_status(self, device_id: str) -> None:
+        """Reset staleness tracking; log when a dropped device recovers."""
+        streak = self._incomplete_streak.pop(device_id, 0)
+        self._incomplete_since.pop(device_id, None)
+        if device_id in self._stale_unavailable:
+            self._stale_unavailable.discard(device_id)
+            _LOGGER.info(
+                "Device %s returned a complete status after %d consecutive "
+                "incomplete polls",
+                device_id,
+                streak,
+            )
 
     def get_capabilities(self, device_id: str) -> dict[str, bool]:
         """Return stable heat/cool capabilities rather than one poll's values."""
