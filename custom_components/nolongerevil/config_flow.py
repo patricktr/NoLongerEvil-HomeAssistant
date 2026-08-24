@@ -9,7 +9,12 @@ from urllib.parse import urlparse
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryState,
+    ConfigFlow,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
@@ -205,15 +210,23 @@ class NLEConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await client.get_devices()
 
-                # Update the config entry with new credentials
-                self.hass.config_entries.async_update_entry(
+                # Update the config entry with new credentials. On a loaded
+                # entry the update listener reloads for us; reload explicitly
+                # only when no listener can have fired — the entry never
+                # finished setup (so the listener was never registered) or the
+                # key is unchanged (so no update event was emitted). Exactly
+                # one reload runs either way.
+                changed = self.hass.config_entries.async_update_entry(
                     existing_entry,
                     data={
                         **existing_entry.data,
                         CONF_API_KEY: api_key,
                     },
                 )
-                await self.hass.config_entries.async_reload(existing_entry.entry_id)
+                if not changed or existing_entry.state is not ConfigEntryState.LOADED:
+                    await self.hass.config_entries.async_reload(
+                        existing_entry.entry_id
+                    )
                 return self.async_abort(reason="reauth_successful")
 
             except NLEAuthenticationError:
