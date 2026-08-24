@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import NLEClientBase, NLEDevice, NLEDeviceStatus
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, RUNTIME_CACHE_KEYS
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
+from .exceptions import NLEIncompleteStatusError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,6 +75,15 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             for device in devices
         }
 
+        # The API occasionally omits a thermostat's mode. Restore the cache
+        # across restarts and reloads so an omission does not become "heat".
+        persisted_modes: dict[str, str] = config_entry.data.get("mode_cache", {})
+        self._mode_cache: dict[str, str] = {
+            device.id: persisted_modes[device.id]
+            for device in devices
+            if device.id in persisted_modes
+        }
+
         self._consecutive_auth_probe_failures = 0
 
         scan_interval = config_entry.options.get(
@@ -116,6 +126,7 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                 try:
                     status = await self.client.get_device_status(device_id)
                     self._apply_capability_latch(device_id, status)
+                    self._apply_mode_latch(device_id, status)
                     data[device_id] = status
                 except NLEAuthenticationError as err:
                     if auth_probe_result is None:
@@ -125,6 +136,20 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                         device_id,
                         auth_probe_result,
                         err,
+                    )
+                except NLEIncompleteStatusError:
+                    # Preserve the last complete snapshot when shared state is omitted.
+                    previous_status = self.get_device_status(device_id)
+                    if previous_status is not None:
+                        cached_mode = self._mode_cache.get(device_id)
+                        if cached_mode is not None:
+                            previous_status.target_temperature_type = cached_mode
+                        data[device_id] = previous_status
+                    _LOGGER.debug(
+                        "Device %s returned an incomplete status; retained "
+                        "last known status: %s",
+                        device_id,
+                        previous_status is not None,
                     )
                 except NLEError as err:
                     # Transient per-device errors (e.g. occasional HTTP 502 from
@@ -248,6 +273,35 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
         _LOGGER.debug("Persisted capability cache: %s", self._capability_cache)
 
+    def _apply_mode_latch(self, device_id: str, status: NLEDeviceStatus) -> None:
+        """Remember a reported HVAC mode or restore the last known value.
+
+        Only explicit API values replace the cache; a missing value reuses it.
+        """
+        api_mode = status.target_temperature_type
+        if api_mode is None:
+            status.target_temperature_type = self._mode_cache.get(device_id, "heat")
+            return
+        self._remember_mode(device_id, api_mode)
+
+    def _remember_mode(self, device_id: str, mode: str) -> None:
+        """Cache and persist a device's last known HVAC mode when it changes."""
+        if self._mode_cache.get(device_id) != mode:
+            self._mode_cache[device_id] = mode
+            self._persist_mode_cache()
+
+    def _persist_mode_cache(self) -> None:
+        """Persist modes so the latch survives restarts and reloads."""
+        new_data = {**self.config_entry.data, "mode_cache": self._mode_cache}
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+        _LOGGER.debug("Persisted mode cache: %s", self._mode_cache)
+
+    def get_capabilities(self, device_id: str) -> dict[str, bool]:
+        """Return stable heat/cool capabilities rather than one poll's values."""
+        return self._capability_cache.get(
+            device_id, {"can_cool": False, "can_heat": False}
+        )
+
     def get_device(self, device_id: str) -> NLEDevice | None:
         """Get device info by ID."""
         return self.devices.get(device_id)
@@ -281,6 +335,12 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
     async def async_set_hvac_mode(self, device_id: str, mode: str) -> None:
         """Set HVAC mode for a device."""
         await self.client.set_hvac_mode(device_id, mode)
+        # Cache after a successful write but before refreshing: the immediate
+        # status response may omit the mode and must restore the new value.
+        self._remember_mode(
+            device_id,
+            "range" if mode == "heat-cool" else mode,
+        )
         await self.async_request_refresh()
 
     async def async_set_away_mode(self, device_id: str, away: bool) -> None:

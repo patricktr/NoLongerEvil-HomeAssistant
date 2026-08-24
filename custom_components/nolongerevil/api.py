@@ -31,6 +31,7 @@ from .exceptions import (
     NLEAuthenticationError,
     NLEConnectionError,
     NLEError,
+    NLEIncompleteStatusError,
     NLERateLimitError,
 )
 
@@ -107,10 +108,11 @@ class NLEDeviceStatus:
 
         self.current_temperature = data.get("current_temperature")
         self.target_temperature = data.get("target_temperature")
-        # Control API reports mode directly: heat | cool | range | off |
-        # emergency. The hvac_mode property below maps range -> heat-cool and
-        # emergency -> heat, matching the cloud behaviour.
-        self.target_temperature_type = data.get("mode", "heat")
+        # Control API modes are heat | cool | range | off | emergency. The
+        # hvac_mode property maps range -> heat-cool and emergency -> heat.
+        # Do not default an omitted mode here; the coordinator restores the
+        # last known value instead.
+        self.target_temperature_type: str | None = data.get("mode")
         self.target_temperature_low = data.get("target_temperature_low")
         self.target_temperature_high = data.get("target_temperature_high")
 
@@ -158,11 +160,23 @@ class NLEDeviceStatus:
 
         # Get state data
         state = self._data.get("state", {})
+        if not isinstance(state, dict):
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
 
         # Find the shared state data
         shared_key = f"shared.{self.serial}"
         shared_obj = state.get(shared_key, {})
+        if not isinstance(shared_obj, dict):
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
         shared_data = shared_obj.get("value", {})
+        if not isinstance(shared_data, dict) or not shared_data:
+            raise NLEIncompleteStatusError(
+                f"Status response for device {self.serial} is missing shared state"
+            )
 
         # Find the device settings data
         device_key = f"device.{self.serial}"
@@ -172,8 +186,10 @@ class NLEDeviceStatus:
         # Current state
         self.current_temperature: float | None = shared_data.get("current_temperature")
         self.target_temperature: float | None = shared_data.get("target_temperature")
-        self.target_temperature_type: str = shared_data.get(
-            "target_temperature_type", "heat"
+        # Do not default an omitted mode to "heat" here. The API occasionally
+        # omits this field, so the coordinator restores the last known mode.
+        self.target_temperature_type: str | None = shared_data.get(
+            "target_temperature_type"
         )
         self.target_temperature_low: float | None = shared_data.get(
             "target_temperature_low"
@@ -216,6 +232,9 @@ class NLEDeviceStatus:
     @property
     def hvac_mode(self) -> str:
         """Return the current HVAC mode."""
+        if self.target_temperature_type is None:
+            # Statuses normally pass through the coordinator's mode latch first.
+            return "heat"
         if self.target_temperature_type == "range":
             return "heat-cool"
         if self.target_temperature_type == "emergency":

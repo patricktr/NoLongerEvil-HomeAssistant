@@ -11,6 +11,10 @@ class NLEAPIError(NLEError):
     """Exception for API errors."""
 
 
+class NLEIncompleteStatusError(NLEAPIError):
+    """Exception for a successful response without a usable device snapshot."""
+
+
 class NLEAuthenticationError(NLEError):
     """Exception for authentication errors."""
 

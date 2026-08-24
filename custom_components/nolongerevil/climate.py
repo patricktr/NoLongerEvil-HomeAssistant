@@ -75,8 +75,6 @@ class NLEClimate(NLEEntity, ClimateEntity):
             | ClimateEntityFeature.TURN_ON
         )
 
-        # Initialize hvac modes (will be updated in _handle_coordinator_update)
-        self._attr_hvac_modes = [HVACMode.OFF]
         self._attr_fan_modes = [FAN_MODE_AUTO, FAN_MODE_ON, FAN_MODE_OFF]
 
         # Add target temp range support for heat-cool mode
@@ -84,19 +82,19 @@ class NLEClimate(NLEEntity, ClimateEntity):
 
     @property
     def hvac_modes(self) -> list[HVACMode]:
-        """Return the list of available HVAC modes."""
-        status = self.device_status
-        if status is None:
-            return [HVACMode.OFF]
+        """Return HVAC modes from the persisted capability latch.
 
+        HomeKit caches the modes available when it creates the accessory, so a
+        transiently incomplete status must not narrow the advertised mode list.
+        """
+        caps = self.coordinator.get_capabilities(self._device_id)
         modes = [HVACMode.OFF]
-        if status.can_heat:
+        if caps["can_heat"]:
             modes.append(HVACMode.HEAT)
-        if status.can_cool:
+        if caps["can_cool"]:
             modes.append(HVACMode.COOL)
-        if status.can_heat and status.can_cool:
+        if caps["can_heat"] and caps["can_cool"]:
             modes.append(HVACMode.HEAT_COOL)
-
         return modes
 
     @property
