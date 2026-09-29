@@ -38,6 +38,8 @@ from .exceptions import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Applied per request: Home Assistant's shared session otherwise allows 300 s,
+# long enough for one hung request (and its retry) to stall a whole poll.
 DEFAULT_TIMEOUT = ClientTimeout(total=30)
 
 
@@ -330,6 +332,7 @@ class NLEApiClient(NLEClientBase):
                 url,
                 headers=self._headers,
                 json=data if data else None,
+                timeout=DEFAULT_TIMEOUT,
             ) as response:
                 self._update_rate_limits(response.headers)
 
@@ -517,6 +520,7 @@ class NLESelfHostedClient(NLEClientBase):
                 url,
                 params=params,
                 json=data if data is not None else None,
+                timeout=DEFAULT_TIMEOUT,
             ) as response:
                 if response.status == 404:
                     raise NLEAPIError("Resource not found")
