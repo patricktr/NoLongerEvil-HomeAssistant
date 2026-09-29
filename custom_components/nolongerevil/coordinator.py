@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from time import monotonic
@@ -23,7 +24,7 @@ from .const import (
     RUNTIME_CACHE_KEYS,
 )
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
-from .exceptions import NLEIncompleteStatusError
+from .exceptions import NLEIncompleteStatusError, NLEServerError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,13 @@ _LOGGER = logging.getLogger(__name__)
 # brief auth-service flap during a deploy — while still surfacing a real
 # revoked-key state within ~3 polls.
 _AUTH_PROBE_FAILURE_THRESHOLD = 3
+
+# A status fetch that fails with a connection error or a 5xx is retried once
+# within the same poll after this delay. Most such failures are single blips
+# (a dropped packet, a gateway restarting), and a quick retry clears them
+# without serving stale data at all. Auth, rate-limit and incomplete-status
+# failures are not retried: repeating the request cannot fix them.
+_RETRY_DELAY_SECONDS = 2
 
 
 def _reload_relevant_config(
@@ -151,7 +159,7 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         try:
             for device_id in self.devices:
                 try:
-                    status = await self.client.get_device_status(device_id)
+                    status = await self._fetch_status(device_id)
                     self._apply_capability_latch(device_id, status)
                     self._apply_mode_latch(device_id, status)
                     data[device_id] = status
@@ -228,6 +236,20 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             raise UpdateFailed("Failed to get status for any device")
 
         return data
+
+    async def _fetch_status(self, device_id: str) -> NLEDeviceStatus:
+        """Fetch a device status, retrying once on a transient failure."""
+        try:
+            return await self.client.get_device_status(device_id)
+        except (NLEConnectionError, NLEServerError) as err:
+            _LOGGER.debug(
+                "Status fetch for device %s failed (%s); retrying in %d s",
+                device_id,
+                err,
+                _RETRY_DELAY_SECONDS,
+            )
+        await asyncio.sleep(_RETRY_DELAY_SECONDS)
+        return await self.client.get_device_status(device_id)
 
     async def _probe_api_key(self) -> bool | None:
         """Probe the API to check whether the configured key is still valid.

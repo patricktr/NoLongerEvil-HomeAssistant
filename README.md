@@ -113,6 +113,8 @@ You can configure the following options after installation:
 | Scan Interval | How often to poll for updates (seconds) | 30 |
 | Mark Unavailable After | How long to keep showing the last known state when updates fail, before entities go unavailable (minutes, 0-60). Set 0 to be told about every failed update. | 5 |
 
+Failed status requests caused by a network blip or a server error (5xx) are retried once after 2 seconds before they count as a failed update.
+
 A disabled-by-default diagnostic sensor, **Last successful update**, shows when each thermostat last reported a complete status. It stays available during outages, so you can alert on it (for example, when it is more than 15 minutes old) instead of on entities going unavailable.
 
 ## Self-Hosted Users

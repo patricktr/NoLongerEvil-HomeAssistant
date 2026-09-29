@@ -15,6 +15,10 @@ class NLEIncompleteStatusError(NLEAPIError):
     """Exception for a successful response without a usable device snapshot."""
 
 
+class NLEServerError(NLEAPIError):
+    """Exception for a 5xx response, which is usually transient."""
+
+
 class NLEAuthenticationError(NLEError):
     """Exception for authentication errors."""
 

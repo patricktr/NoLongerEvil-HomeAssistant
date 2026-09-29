@@ -33,6 +33,7 @@ from .exceptions import (
     NLEError,
     NLEIncompleteStatusError,
     NLERateLimitError,
+    NLEServerError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -362,6 +363,8 @@ class NLEApiClient(NLEClientBase):
                         error_msg = error_data.get("error", "Unknown error")
                     except Exception:
                         error_msg = f"HTTP {response.status}"
+                    if response.status >= 500:
+                        raise NLEServerError(f"API error: {error_msg}")
                     raise NLEAPIError(f"API error: {error_msg}")
 
                 return await response.json()
@@ -376,10 +379,13 @@ class NLEApiClient(NLEClientBase):
             _LOGGER.error("HTTP error: %s", err)
             raise NLEAPIError(f"HTTP error: {err}") from err
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Request timeout")
+            # Transient failures are logged by the caller, which knows
+            # whether one matters (the coordinator retries and rides out
+            # short outages; the config flow shows a form error).
+            _LOGGER.debug("Request timeout")
             raise NLEConnectionError("Request timeout") from err
         except ClientError as err:
-            _LOGGER.error("Connection error: %s", err)
+            _LOGGER.debug("Connection error: %s", err)
             raise NLEConnectionError(f"Connection error: {err}") from err
 
     async def get_devices(self) -> list[NLEDevice]:
@@ -525,6 +531,8 @@ class NLESelfHostedClient(NLEClientBase):
                         )
                     except Exception:
                         error_msg = f"HTTP {response.status}"
+                    if response.status >= 500:
+                        raise NLEServerError(f"API error: {error_msg}")
                     raise NLEAPIError(f"API error: {error_msg}")
 
                 payload = await response.json()
@@ -535,10 +543,13 @@ class NLESelfHostedClient(NLEClientBase):
             _LOGGER.error("Invalid URL: %s", err)
             raise NLEConnectionError(f"Invalid URL: {err}") from err
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Request timeout")
+            # Transient failures are logged by the caller, which knows
+            # whether one matters (the coordinator retries and rides out
+            # short outages; the config flow shows a form error).
+            _LOGGER.debug("Request timeout")
             raise NLEConnectionError("Request timeout") from err
         except ClientError as err:
-            _LOGGER.error("Connection error: %s", err)
+            _LOGGER.debug("Connection error: %s", err)
             raise NLEConnectionError(f"Connection error: {err}") from err
 
         # The /command endpoint reports failures in-band as {"success": false}.
