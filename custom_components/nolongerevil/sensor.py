@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -10,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -37,6 +38,7 @@ async def async_setup_entry(
             NLETemperatureSensor(coordinator, device),
             NLETargetTemperatureSensor(coordinator, device),
             NLEHVACActionSensor(coordinator, device),
+            NLELastUpdateSensor(coordinator, device),
         ])
 
     async_add_entities(entities)
@@ -145,3 +147,37 @@ class NLEHVACActionSensor(NLEEntity, SensorEntity):
         elif action == "fan":
             return "mdi:fan"
         return "mdi:thermostat"
+
+
+class NLELastUpdateSensor(NLEEntity, SensorEntity):
+    """When the device last returned a complete status.
+
+    While updates fail, the other entities keep showing the last known state
+    for the configured unavailable-after window, so their values can be
+    older than they look. This sensor makes that age visible, and stays
+    available through outages so automations can alert on it.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_name = "Last successful update"
+
+    def __init__(
+        self,
+        coordinator: NLEDataUpdateCoordinator,
+        device: NLEDevice,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.id}_last_update"
+
+    @property
+    def available(self) -> bool:
+        """Return True once the device has updated successfully at least once."""
+        return self.native_value is not None
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return when the device last returned a complete status."""
+        return self.coordinator.get_last_success(self._device_id)

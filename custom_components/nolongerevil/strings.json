@@ -58,10 +58,12 @@
         "title": "No Longer Evil Options",
         "description": "Configure integration options",
         "data": {
-          "scan_interval": "Update interval (seconds)"
+          "scan_interval": "Update interval (seconds)",
+          "unavailable_after": "Mark unavailable after (minutes)"
         },
         "data_description": {
-          "scan_interval": "How often to poll for updates (10-300 seconds)"
+          "scan_interval": "How often to poll for updates (10-300 seconds)",
+          "unavailable_after": "How long to keep showing the last known state when updates fail before marking entities unavailable (0-60). Use 0 to mark them unavailable on the first failed update."
         }
       }
     }
@@ -81,6 +83,9 @@
       },
       "hvac_action": {
         "name": "HVAC action"
+      },
+      "last_update": {
+        "name": "Last successful update"
       }
     },
     "binary_sensor": {

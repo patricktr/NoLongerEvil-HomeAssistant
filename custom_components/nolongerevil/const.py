@@ -8,6 +8,10 @@ DOMAIN: Final = "nolongerevil"
 CONF_API_KEY: Final = "api_key"
 CONF_BASE_URL: Final = "base_url"
 CONF_HOST_TYPE: Final = "host_type"
+# Minutes a device may keep showing its last known state while updates fail
+# before its entities are marked unavailable. 0 marks them unavailable on the
+# first failed update.
+CONF_UNAVAILABLE_AFTER: Final = "unavailable_after"
 
 # Host types — selected at the start of the config flow. "cloud" talks to the
 # hosted No Longer Evil REST API (Bearer nle_ keys); "self_hosted" talks to the
@@ -21,6 +25,8 @@ DEFAULT_BASE_URL: Final = "https://nolongerevil.com/api/v1"
 # is only a hint for the expected "http://<lan-ip>:8082" format.
 DEFAULT_SELFHOSTED_URL: Final = "http://192.168.1.50:8082"
 DEFAULT_SCAN_INTERVAL: Final = 30  # seconds
+DEFAULT_UNAVAILABLE_AFTER: Final = 5  # minutes
+MAX_UNAVAILABLE_AFTER: Final = 60  # minutes
 
 # Config entry data keys the coordinator writes at runtime (the capability
 # latch, and the HVAC-mode latch once present). The update listener must not

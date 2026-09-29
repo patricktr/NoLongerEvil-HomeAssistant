@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any
 
@@ -12,9 +12,16 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import NLEClientBase, NLEDevice, NLEDeviceStatus
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, RUNTIME_CACHE_KEYS
+from .const import (
+    CONF_UNAVAILABLE_AFTER,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_UNAVAILABLE_AFTER,
+    DOMAIN,
+    RUNTIME_CACHE_KEYS,
+)
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
 from .exceptions import NLEIncompleteStatusError
 
@@ -27,15 +34,6 @@ _LOGGER = logging.getLogger(__name__)
 # brief auth-service flap during a deploy — while still surfacing a real
 # revoked-key state within ~3 polls.
 _AUTH_PROBE_FAILURE_THRESHOLD = 3
-
-# How long a device may keep serving its last complete snapshot while the API
-# returns incomplete statuses. Generous enough to ride out a router reboot,
-# but bounded so a persistent API problem surfaces as unavailable entities
-# instead of indefinitely frozen values. Both limits apply: the poll count
-# scales with the configured scan interval, and the wall-clock cap keeps slow
-# intervals (up to 300 s) from stretching retention to nearly an hour.
-_MAX_INCOMPLETE_POLLS = 10
-_MAX_STALE_SECONDS = 15 * 60
 
 
 def _reload_relevant_config(
@@ -94,18 +92,25 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
             if device.id in persisted_modes
         }
 
-        # Staleness bookkeeping for incomplete statuses: consecutive
-        # incomplete polls per device, when each streak started, and which
-        # devices have been dropped from the data set until a complete
-        # status arrives.
-        self._incomplete_streak: dict[str, int] = {}
-        self._incomplete_since: dict[str, float] = {}
+        # Staleness bookkeeping for failed polls: when each device last
+        # returned a complete status (monotonic for the grace-window check,
+        # wall clock for the diagnostic sensor), its consecutive failed
+        # polls, and which devices have been dropped from the data set until
+        # a complete status arrives.
+        self._last_success_monotonic: dict[str, float] = {}
+        self._last_success: dict[str, datetime] = {}
+        self._failure_streak: dict[str, int] = {}
         self._stale_unavailable: set[str] = set()
 
         self._consecutive_auth_probe_failures = 0
 
         scan_interval = config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        # How long a device keeps serving its last complete snapshot while
+        # its updates fail, before its entities go unavailable.
+        self._unavailable_after = 60 * config_entry.options.get(
+            CONF_UNAVAILABLE_AFTER, DEFAULT_UNAVAILABLE_AFTER
         )
 
         super().__init__(
@@ -138,6 +143,10 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         # False = probe returned 401 (key looks invalid)
         # None  = not probed yet, or probe was inconclusive (other error)
         auth_probe_result: bool | None = None
+        # Whether any device got an authenticated response this poll.
+        # Retained snapshots also land in ``data``, so ``data`` alone is no
+        # evidence that the API key works.
+        api_responded = False
 
         try:
             for device_id in self.devices:
@@ -146,7 +155,9 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                     self._apply_capability_latch(device_id, status)
                     self._apply_mode_latch(device_id, status)
                     data[device_id] = status
+                    api_responded = True
                     self._note_complete_status(device_id)
+                    continue
                 except NLEAuthenticationError as err:
                     if auth_probe_result is None:
                         auth_probe_result = await self._probe_api_key()
@@ -156,23 +167,32 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
                         auth_probe_result,
                         err,
                     )
-                except NLEIncompleteStatusError:
-                    retained = self._handle_incomplete_status(device_id)
-                    if retained is not None:
-                        data[device_id] = retained
+                except NLEIncompleteStatusError as err:
+                    api_responded = True
+                    _LOGGER.debug(
+                        "Device %s returned an incomplete status: %s",
+                        device_id,
+                        err,
+                    )
                 except NLEError as err:
                     # Transient per-device errors (e.g. occasional HTTP 502 from
                     # the upstream gateway) — keep noise out of the log and let
-                    # the next poll retry. If every device fails this poll we
-                    # still raise UpdateFailed below.
+                    # the grace window below decide what the entities show.
                     _LOGGER.debug(
                         "Failed to get status for device %s: %s", device_id, err
                     )
 
+                # Every failure above rides out the grace window on the last
+                # complete snapshot. If no device has fresh or retained data
+                # this poll we still raise UpdateFailed below.
+                retained = self._handle_failed_poll(device_id)
+                if retained is not None:
+                    data[device_id] = retained
+
             # Reconcile the consecutive-failure counter once per poll.
-            if data or auth_probe_result is True:
+            if api_responded or auth_probe_result is True:
                 # Any evidence the key works this poll resets the counter:
-                # either a device fetch succeeded, or the explicit probe
+                # either a device fetch got a response, or the explicit probe
                 # confirmed the key is valid.
                 self._consecutive_auth_probe_failures = 0
             elif auth_probe_result is False:
@@ -305,74 +325,78 @@ class NLEDataUpdateCoordinator(DataUpdateCoordinator[dict[str, NLEDeviceStatus]]
         self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
         _LOGGER.debug("Persisted mode cache: %s", self._mode_cache)
 
-    def _handle_incomplete_status(self, device_id: str) -> NLEDeviceStatus | None:
+    def _handle_failed_poll(self, device_id: str) -> NLEDeviceStatus | None:
         """Serve the last complete snapshot through a bounded outage.
 
         Returns the snapshot to keep publishing, or None once the device has
-        been incomplete for more than _MAX_INCOMPLETE_POLLS consecutive polls
-        or _MAX_STALE_SECONDS — the device then drops out of the data set and
-        its entities go unavailable until a complete status arrives.
+        gone the configured unavailable-after window without a complete
+        status — the device then drops out of the data set and its entities
+        go unavailable until a complete status arrives. A window of 0 drops
+        the device on its first failed poll.
         """
-        now = monotonic()
-        streak = self._incomplete_streak.get(device_id, 0) + 1
-        self._incomplete_streak[device_id] = streak
-        stale_since = self._incomplete_since.setdefault(device_id, now)
+        streak = self._failure_streak.get(device_id, 0) + 1
+        self._failure_streak[device_id] = streak
+        last_success = self._last_success_monotonic.get(device_id)
+        previous_status = self.get_device_status(device_id)
 
-        if (
-            streak <= _MAX_INCOMPLETE_POLLS
-            and now - stale_since <= _MAX_STALE_SECONDS
-        ):
-            previous_status = self.get_device_status(device_id)
-            if previous_status is not None:
-                cached_mode = self._mode_cache.get(device_id)
-                if cached_mode is not None:
-                    previous_status.target_temperature_type = cached_mode
-                _LOGGER.debug(
-                    "Device %s returned an incomplete status; retaining last "
-                    "known status (%d consecutive)",
-                    device_id,
-                    streak,
-                )
-                return previous_status
+        if last_success is None or previous_status is None:
             _LOGGER.debug(
-                "Device %s returned an incomplete status with no snapshot "
-                "to retain (%d consecutive)",
+                "Device %s has no snapshot to retain (%d consecutive failed "
+                "polls)",
                 device_id,
                 streak,
             )
             return None
 
+        age = monotonic() - last_success
+        if age < self._unavailable_after:
+            cached_mode = self._mode_cache.get(device_id)
+            if cached_mode is not None:
+                previous_status.target_temperature_type = cached_mode
+            _LOGGER.debug(
+                "Device %s update failed; retaining last known status from "
+                "%.0f s ago (%d consecutive failed polls)",
+                device_id,
+                age,
+                streak,
+            )
+            return previous_status
+
         if device_id not in self._stale_unavailable:
             self._stale_unavailable.add(device_id)
             _LOGGER.warning(
-                "Device %s has returned no complete status for %d consecutive "
-                "polls (%.0f s); its entities are unavailable until a "
-                "complete status arrives",
+                "Device %s has had no successful update for %.0f s (%d "
+                "consecutive failed polls); its entities are unavailable "
+                "until it recovers",
                 device_id,
+                age,
                 streak,
-                now - stale_since,
             )
         else:
             _LOGGER.debug(
-                "Device %s still returning incomplete statuses "
-                "(%d consecutive)",
+                "Device %s still failing to update (%d consecutive)",
                 device_id,
                 streak,
             )
         return None
 
     def _note_complete_status(self, device_id: str) -> None:
-        """Reset staleness tracking; log when a dropped device recovers."""
-        streak = self._incomplete_streak.pop(device_id, 0)
-        self._incomplete_since.pop(device_id, None)
+        """Record a successful update; log when a dropped device recovers."""
+        self._last_success_monotonic[device_id] = monotonic()
+        self._last_success[device_id] = dt_util.utcnow()
+        streak = self._failure_streak.pop(device_id, 0)
         if device_id in self._stale_unavailable:
             self._stale_unavailable.discard(device_id)
             _LOGGER.info(
-                "Device %s returned a complete status after %d consecutive "
-                "incomplete polls",
+                "Device %s updated successfully after %d consecutive failed "
+                "polls",
                 device_id,
                 streak,
             )
+
+    def get_last_success(self, device_id: str) -> datetime | None:
+        """Return when the device last returned a complete status."""
+        return self._last_success.get(device_id)
 
     def get_capabilities(self, device_id: str) -> dict[str, bool]:
         """Return stable heat/cool capabilities rather than one poll's values."""

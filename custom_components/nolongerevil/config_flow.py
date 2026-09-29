@@ -25,12 +25,15 @@ from .const import (
     CONF_API_KEY,
     CONF_BASE_URL,
     CONF_HOST_TYPE,
+    CONF_UNAVAILABLE_AFTER,
     DEFAULT_BASE_URL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SELFHOSTED_URL,
+    DEFAULT_UNAVAILABLE_AFTER,
     DOMAIN,
     HOST_TYPE_CLOUD,
     HOST_TYPE_SELF_HOSTED,
+    MAX_UNAVAILABLE_AFTER,
 )
 from .exceptions import NLEAuthenticationError, NLEConnectionError, NLEError
 
@@ -268,6 +271,15 @@ class NLEOptionsFlow(OptionsFlow):
                             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
+                    vol.Optional(
+                        CONF_UNAVAILABLE_AFTER,
+                        default=self.config_entry.options.get(
+                            CONF_UNAVAILABLE_AFTER, DEFAULT_UNAVAILABLE_AFTER
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int),
+                        vol.Range(min=0, max=MAX_UNAVAILABLE_AFTER),
+                    ),
                 }
             ),
         )

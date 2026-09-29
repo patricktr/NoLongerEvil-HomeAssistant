@@ -111,6 +111,9 @@ You can configure the following options after installation:
 | Option | Description | Default |
 |--------|-------------|---------|
 | Scan Interval | How often to poll for updates (seconds) | 30 |
+| Mark Unavailable After | How long to keep showing the last known state when updates fail, before entities go unavailable (minutes, 0-60). Set 0 to be told about every failed update. | 5 |
+
+A disabled-by-default diagnostic sensor, **Last successful update**, shows when each thermostat last reported a complete status. It stays available during outages, so you can alert on it (for example, when it is more than 15 minutes old) instead of on entities going unavailable.
 
 ## Self-Hosted Users
 
@@ -164,6 +167,7 @@ background on this configuration.
 ### Connection Issues
 
 - Check your network connection
+- If brief outages fill the Activity log with "Unavailable" entries, raise **Mark Unavailable After** in the integration options. Raising the scan interval makes each gap longer rather than rarer.
 - For self-hosted users, ensure your server is reachable
 - The API rate limit is 20 requests per minute for API keys
 
