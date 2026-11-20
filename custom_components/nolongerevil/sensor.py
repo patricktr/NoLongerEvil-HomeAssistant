@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 from homeassistant.components.sensor import (
@@ -11,7 +12,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfElectricPotential,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -38,6 +44,8 @@ async def async_setup_entry(
             NLETemperatureSensor(coordinator, device),
             NLETargetTemperatureSensor(coordinator, device),
             NLEHVACActionSensor(coordinator, device),
+            NLEHumiditySensor(coordinator, device),
+            NLEBatterySensor(coordinator, device),
             NLELastUpdateSensor(coordinator, device),
         ])
 
@@ -181,3 +189,89 @@ class NLELastUpdateSensor(NLEEntity, SensorEntity):
     def native_value(self) -> datetime | None:
         """Return when the device last returned a complete status."""
         return self.coordinator.get_last_success(self._device_id)
+
+
+HOLD_SECONDS = 900
+
+
+def _hold(entity, status, value):
+    """Keep the last good reading for up to 15 min through short API gaps.
+
+    The window starts when a reading arrives in a fresh status object.
+    Re-reading a retained (cached) status does not renew it.
+    """
+    now = time.monotonic()
+    held = getattr(entity, "_held", None)
+    if value is not None:
+        if held is None or held[2] is not status:
+            held = entity._held = (value, now, status)
+        return held[0] if now - held[1] <= HOLD_SECONDS else None
+    if held is not None and now - held[1] <= HOLD_SECONDS:
+        return held[0]
+    return None
+
+
+def _number_in_range(value, low, high):
+    """Return value if it is a real number inside [low, high], else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not low <= value <= high:
+        return None
+    return value
+
+
+class NLEHumiditySensor(NLEEntity, SensorEntity):
+    """Relative humidity reported by the thermostat."""
+
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_name = "Humidity"
+
+    def __init__(
+        self,
+        coordinator: NLEDataUpdateCoordinator,
+        device: NLEDevice,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.id}_humidity"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the relative humidity in percent."""
+        status = self.device_status
+        if status is None:
+            return None
+        value = _number_in_range(getattr(status, "current_humidity", None), 0, 100)
+        return _hold(self, status, None if value is None else round(value))
+
+
+class NLEBatterySensor(NLEEntity, SensorEntity):
+    """Battery voltage reported by the thermostat."""
+
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 2
+    _attr_name = "Battery voltage"
+
+    def __init__(
+        self,
+        coordinator: NLEDataUpdateCoordinator,
+        device: NLEDevice,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.id}_battery_voltage"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the battery voltage."""
+        status = self.device_status
+        if status is None:
+            return None
+        return _hold(
+            self, status, _number_in_range(getattr(status, "battery_level", None), 0, 10)
+        )

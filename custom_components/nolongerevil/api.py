@@ -145,6 +145,9 @@ class NLEDeviceStatus:
             data.get("temperature_lock_enabled", False)
         )
 
+        self.current_humidity = data.get("current_humidity")
+        self.battery_level = data.get("battery_level")
+
         _LOGGER.debug(
             "Self-hosted device %s: mode=%s can_heat=%s can_cool=%s",
             self.serial,
@@ -231,6 +234,10 @@ class NLEDeviceStatus:
         self.temperature_lock_enabled: bool = device_data.get(
             "temperature_lock_enabled", False
         )
+
+        # Sensor readings in the device object (not in the API docs)
+        self.current_humidity = device_data.get("current_humidity")
+        self.battery_level = device_data.get("battery_level")
 
     @property
     def hvac_mode(self) -> str:
